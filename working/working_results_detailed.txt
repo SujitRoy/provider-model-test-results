@@ -1,0 +1,15 @@
+CUSTOM API WORKING RESULTS
+============================================================
+API URL: http://80.225.251.135:1337
+Test Date: 2026-02-12 12:51:59
+Total Working Models: 4
+============================================================
+
+
+ApiAirforce:
+  bard (text) - 4.78s
+
+CohereForAI_C4AI_Command:
+  command-a-03-2025 (text) - 1.75s
+  command-r-08-2024 (text) - 1.81s
+  command-r-plus-08-2024 (text) - 1.67s
