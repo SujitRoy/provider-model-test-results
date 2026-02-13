@@ -17,8 +17,11 @@ env.bak/
 venv.bak/
 pythonenv.*
 
-# Working directories
+# Working directories - ONLY TRACK working_results.txt
 working/
+!working/working_results.txt
+working/working_results_detailed.txt
+working/last_run.txt
 provider/
 output/
 logs/
