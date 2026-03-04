@@ -155,7 +155,7 @@ class CustomAPITester:
 
     async def test_all_models(self) -> List[TestResult]:
         self.logger.info("\n" + "="*60)
-        self.logger.info(f"TESTING CUSTOM API: {self.custom_api_url}")
+        self.logger.info(f"TESTING CUSTOM API")
         self.logger.info("="*60)
         
         provider_ids = await self.fetch_providers()
@@ -230,7 +230,6 @@ class CustomAPITester:
         print("\n" + "="*60)
         print("FINAL SUMMARY")
         print("="*60)
-        print(f"API URL: {self.custom_api_url}")
         print(f"Total Models Tested: {len(results)}")
         print(f"Working Models: {len(working_results)}")
         print(f"Failed Models: {len(results) - len(working_results)}")
@@ -258,12 +257,19 @@ class CustomAPITester:
                 print(f"   • {media_type}: {count} models")
 
 async def main():
-    API_URL = os.getenv('CUSTOM_API_URL', 'http://80.225.251.135:1337')
+    API_URL = os.getenv('CUSTOM_API_URL')
+    
+    if not API_URL:
+        print("="*60)
+        print("ERROR: CUSTOM_API_URL not set in .env file")
+        print("Please create a .env file with:")
+        print("CUSTOM_API_URL=http://your-server-ip:1337")
+        print("="*60)
+        return
     
     print("="*60)
     print("CUSTOM API PROVIDER/MODEL TESTER")
     print("="*60)
-    print(f"Testing API: {API_URL}")
     print("Workflow:")
     print("   1. GET /v1/providers -> Get provider IDs (excluding 'Custom')")
     print("   2. GET /api/{provider}/models -> Get model IDs")
