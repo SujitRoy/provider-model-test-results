@@ -3,7 +3,7 @@ import aiohttp
 import json
 import time
 import os
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import logging
@@ -27,38 +27,34 @@ class CustomAPITester:
         os.makedirs(self.working_dir, exist_ok=True)
         
         self.test_messages = [
-            {"role": "user", "content": "Hello! Reply with 'Yes' if you can respond."}
+            {"role": "user", "content": "You must respond with exactly one word: 'Yes'"}
         ]
         
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
+        self.semaphore = asyncio.Semaphore(5)
 
-    async def fetch_providers(self) -> List[str]:
+    async def fetch_providers(self, session: aiohttp.ClientSession) -> List[str]:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.custom_api_url}/v1/providers",
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        providers = await response.json()
-                        provider_ids = [p.get('id') for p in providers if p.get('id') and p.get('id') != "Custom"]
-                        self.logger.info(f"Found {len(provider_ids)} providers from /v1/providers (excluded 'Custom')")
-                        for pid in provider_ids:
-                            self.logger.info(f"   - {pid}")
-                        return provider_ids
-                    else:
-                        self.logger.error(f"Failed to fetch providers: {response.status}")
-                        return []
+            async with session.get(
+                f"{self.custom_api_url}/v1/providers",
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    providers = await response.json()
+                    provider_ids = [p.get('id') for p in providers if p.get('id') and p.get('id') != "Custom"]
+                    self.logger.info(f"Found {len(provider_ids)} providers")
+                    return provider_ids
+                else:
+                    self.logger.error(f"Failed to fetch providers: {response.status}")
+                    return []
         except Exception as e:
             self.logger.error(f"Error fetching providers: {e}")
             return []
 
-    async def fetch_provider_models(self, session: aiohttp.ClientSession, provider_id: str) -> List[Dict]:
+    async def fetch_provider_models(self, session: aiohttp.ClientSession, provider_id: str) -> Tuple[str, List[Dict]]:
         try:
             url = f"{self.custom_api_url}/api/{provider_id}/models"
-            self.logger.info(f"   Fetching models from: {url}")
-            
             async with session.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=30)
@@ -66,14 +62,16 @@ class CustomAPITester:
                 if response.status == 200:
                     data = await response.json()
                     models = data.get('data', [])
-                    self.logger.info(f"   {provider_id}: {len(models)} models found")
-                    return models
+                    self.logger.info(f"{provider_id}: {len(models)} models")
+                    for model in models:
+                        print(f"  Found model: {provider_id} | {model.get('id')}")
+                    return provider_id, models
                 else:
-                    self.logger.warning(f"   {provider_id}: Failed to fetch models - {response.status}")
-                    return []
+                    self.logger.warning(f"{provider_id}: Failed to fetch models - {response.status}")
+                    return provider_id, []
         except Exception as e:
-            self.logger.warning(f"   {provider_id}: Error - {e}")
-            return []
+            self.logger.warning(f"{provider_id}: Error - {e}")
+            return provider_id, []
 
     def determine_media_type(self, model: Dict) -> str:
         model_type = model.get('type', '')
@@ -91,115 +89,173 @@ class CustomAPITester:
         
         return 'text'
 
+    def validate_response_content(self, content: str) -> Tuple[bool, str]:
+        if not content or not content.strip():
+            return False, "Empty response"
+        
+        content_lower = content.lower().strip()
+        
+        if content_lower == 'yes':
+            return True, None
+        
+        if 'yes' in content_lower:
+            return True, None
+        
+        return False, "Response did not contain 'Yes'"
+
     async def test_model(self, session: aiohttp.ClientSession, provider_id: str, model: Dict) -> TestResult:
-        start_time = time.time()
         model_id = model.get('id')
         media_type = self.determine_media_type(model)
         
-        try:
-            endpoint = f"{self.custom_api_url}/api/{provider_id}/chat/completions"
-            payload = {
-                "model": model_id,
-                "messages": self.test_messages,
-                "stream": False,
-                "max_tokens": 10
-            }
-            
-            async with session.post(
-                endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                response_time = time.time() - start_time
+        print(f"\nTesting: {provider_id} | {model_id}")
+        
+        async with self.semaphore:
+            start_time = time.time()
+            try:
+                endpoint = f"{self.custom_api_url}/api/{provider_id}/chat/completions"
+                payload = {
+                    "model": model_id,
+                    "messages": self.test_messages,
+                    "stream": False,
+                    "max_tokens": 10
+                }
                 
-                if response.status == 200:
-                    response_data = await response.json()
-                    working = 'choices' in response_data and len(response_data['choices']) > 0
+                async with session.post(
+                    endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as response:
+                    response_time = time.time() - start_time
                     
-                    return TestResult(
-                        provider=provider_id,
-                        model=model_id,
-                        working=working,
-                        response_time=response_time,
-                        media_type=media_type
-                    )
-                else:
-                    return TestResult(
-                        provider=provider_id,
-                        model=model_id,
-                        working=False,
-                        response_time=response_time,
-                        error=f"HTTP {response.status}",
-                        media_type=media_type
-                    )
-                
-        except asyncio.TimeoutError:
-            return TestResult(
-                provider=provider_id,
-                model=model_id,
-                working=False,
-                response_time=time.time() - start_time,
-                error="Timeout",
-                media_type=media_type
-            )
-        except Exception as e:
-            return TestResult(
-                provider=provider_id,
-                model=model_id,
-                working=False,
-                response_time=time.time() - start_time,
-                error=str(e)[:100],
-                media_type=media_type
-            )
+                    if response.status == 200:
+                        try:
+                            response_data = await response.json()
+                            
+                            if 'choices' not in response_data or len(response_data['choices']) == 0:
+                                print(f"  FAILED: {provider_id}|{model_id} - No choices in response")
+                                return TestResult(
+                                    provider_id, model_id, False, response_time, 
+                                    "No choices in response", media_type
+                                )
+                            
+                            choice = response_data['choices'][0]
+                            if 'message' not in choice or 'content' not in choice['message']:
+                                print(f"  FAILED: {provider_id}|{model_id} - Missing content")
+                                return TestResult(
+                                    provider_id, model_id, False, response_time,
+                                    "Missing content", media_type
+                                )
+                            
+                            content = choice['message']['content']
+                            print(f"  Response: {content[:100]}{'...' if len(content) > 100 else ''}")
+                            
+                            is_valid, error_msg = self.validate_response_content(content)
+                            
+                            if is_valid:
+                                print(f"  WORKING: {provider_id}|{model_id}|{media_type}")
+                                return TestResult(
+                                    provider_id, model_id, True, response_time, 
+                                    media_type=media_type
+                                )
+                            else:
+                                print(f"  FAILED: {provider_id}|{model_id} - {error_msg}")
+                                return TestResult(
+                                    provider_id, model_id, False, response_time,
+                                    error_msg, media_type
+                                )
+                                
+                        except json.JSONDecodeError:
+                            print(f"  FAILED: {provider_id}|{model_id} - Invalid JSON")
+                            return TestResult(
+                                provider_id, model_id, False, response_time,
+                                "Invalid JSON", media_type
+                            )
+                    else:
+                        print(f"  FAILED: {provider_id}|{model_id} - HTTP {response.status}")
+                        return TestResult(
+                            provider_id, model_id, False, response_time,
+                            f"HTTP {response.status}", media_type
+                        )
+                        
+            except asyncio.TimeoutError:
+                print(f"  FAILED: {provider_id}|{model_id} - Timeout")
+                return TestResult(
+                    provider_id, model_id, False, time.time() - start_time,
+                    "Timeout", media_type
+                )
+            except Exception as e:
+                print(f"  FAILED: {provider_id}|{model_id} - {str(e)[:100]}")
+                return TestResult(
+                    provider_id, model_id, False, time.time() - start_time,
+                    str(e)[:100], media_type
+                )
 
     async def test_all_models(self) -> List[TestResult]:
-        self.logger.info("\n" + "="*60)
-        self.logger.info(f"TESTING CUSTOM API")
+        self.logger.info("="*60)
+        self.logger.info("TESTING CUSTOM API")
         self.logger.info("="*60)
         
-        provider_ids = await self.fetch_providers()
-        if not provider_ids:
-            self.logger.error("No providers found (or all were excluded)")
-            return []
-        
-        self.logger.info(f"\nProvider IDs from /v1/providers (excluding 'Custom'): {provider_ids}")
-        
-        all_models = []
         async with aiohttp.ClientSession() as session:
-            for provider_id in provider_ids:
-                self.logger.info(f"\nProcessing provider: {provider_id}")
-                models = await self.fetch_provider_models(session, provider_id)
-                
+            provider_ids = await self.fetch_providers(session)
+            if not provider_ids:
+                self.logger.error("No providers found")
+                return []
+            
+            self.logger.info(f"Fetching models from {len(provider_ids)} providers in parallel")
+            
+            tasks = [self.fetch_provider_models(session, pid) for pid in provider_ids]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            all_models = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"Failed to fetch models for {provider_ids[i]}: {result}")
+                    continue
+                provider_id, models = result
                 for model in models:
                     all_models.append((provider_id, model))
-                    self.logger.info(f"      Found model: {model.get('id')} (type: {model.get('type', 'unknown')})")
-        
-        self.logger.info(f"\nTOTAL: {len(all_models)} models to test across {len(provider_ids)} providers")
-        
-        if not all_models:
-            self.logger.error("No models found for any provider!")
-            return []
-        
-        self.logger.info("\n" + "="*60)
-        self.logger.info("TESTING MODELS WITH CHAT COMPLETIONS")
-        self.logger.info("="*60)
-        
-        results = []
-        async with aiohttp.ClientSession() as session:
-            for i, (provider_id, model) in enumerate(all_models, 1):
-                self.logger.info(f"\nTest {i}/{len(all_models)}: {provider_id} | {model.get('id')}")
-                result = await self.test_model(session, provider_id, model)
-                results.append(result)
-                
-                if result.working:
-                    self.logger.info(f"   WORKING: {result.provider}|{result.model}|{result.media_type}")
+            
+            self.logger.info(f"Total models to test: {len(all_models)}")
+            
+            if not all_models:
+                self.logger.error("No models found")
+                return []
+            
+            self.logger.info("="*60)
+            self.logger.info(f"TESTING {len(all_models)} MODELS (max 5 concurrent)")
+            self.logger.info("="*60)
+            print("\n" + "-"*60)
+            print("TEST PROGRESS")
+            print("-"*60)
+            
+            test_tasks = [self.test_model(session, provider_id, model) for provider_id, model in all_models]
+            results = await asyncio.gather(*test_tasks, return_exceptions=True)
+            
+            final_results = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    provider_id, model = all_models[i]
+                    model_id = model.get('id')
+                    self.logger.error(f"Unhandled exception for {provider_id}|{model_id}: {result}")
+                    final_results.append(TestResult(
+                        provider_id, model_id, False, 0.0, 
+                        f"Exception: {str(result)[:50]}", 
+                        self.determine_media_type(model)
+                    ))
                 else:
-                    self.logger.info(f"   FAILED: {result.provider}|{result.model} - {result.error}")
-                
-                await asyncio.sleep(0.1)
-        
-        return results
+                    final_results.append(result)
+            
+            print("\n" + "-"*60)
+            print("TEST SUMMARY")
+            print("-"*60)
+            for result in final_results:
+                if result.working:
+                    print(f"WORKING: {result.provider}|{result.model}|{result.media_type}")
+                else:
+                    print(f"FAILED: {result.provider}|{result.model} - {result.error}")
+            
+            return final_results
 
     def save_working_results(self, results: List[TestResult]):
         working_results = [r for r in results if r.working]
@@ -210,17 +266,11 @@ class CustomAPITester:
             for result in working_results:
                 f.write(f"{result.provider}|{result.model}|{result.media_type or 'text'}\n")
         
-        self.logger.info(f"\n" + "="*60)
+        self.logger.info("="*60)
         self.logger.info("RESULTS SAVED")
         self.logger.info("="*60)
         self.logger.info(f"File: {filepath}")
-        self.logger.info(f"Total working models: {len(working_results)}")
-        
-        if working_results:
-            self.logger.info("\nContents of working_results.txt:")
-            self.logger.info("-" * 60)
-            for result in working_results:
-                self.logger.info(f"   {result.provider}|{result.model}|{result.media_type or 'text'}")
+        self.logger.info(f"Working models: {len(working_results)}")
         
         return filepath
 
@@ -242,19 +292,10 @@ class CustomAPITester:
             for result in working_results:
                 providers[result.provider] = providers.get(result.provider, 0) + 1
             
-            print("\nWorking Models by Provider (excluded 'Custom'):")
+            print("\nWorking Models by Provider:")
             print("-" * 60)
             for provider, count in sorted(providers.items()):
-                print(f"   • {provider}: {count} models")
-            
-            media_types = {}
-            for result in working_results:
-                media_types[result.media_type] = media_types.get(result.media_type, 0) + 1
-            
-            print("\nMedia Type Breakdown:")
-            print("-" * 60)
-            for media_type, count in sorted(media_types.items()):
-                print(f"   • {media_type}: {count} models")
+                print(f"   {provider}: {count} models")
 
 async def main():
     API_URL = os.getenv('CUSTOM_API_URL')
@@ -270,13 +311,12 @@ async def main():
     print("="*60)
     print("CUSTOM API PROVIDER/MODEL TESTER")
     print("="*60)
-    print("Workflow:")
-    print("   1. GET /v1/providers -> Get provider IDs (excluding 'Custom')")
-    print("   2. GET /api/{provider}/models -> Get model IDs")
-    print("   3. POST /api/{provider}/chat/completions -> Test each model")
-    print("   4. Generate working_results.txt -> Provider|Model|MediaType")
+    print(f"Testing API at: {API_URL}")
+    print(f"Max concurrent tests: 5")
+    print(f"Timeout per model: 60 seconds")
     print("="*60)
     
+    start_time = time.time()
     tester = CustomAPITester(API_URL)
     
     print("\nStarting tests...")
@@ -286,9 +326,13 @@ async def main():
         tester.save_working_results(results)
         tester.print_summary(results)
         
+        elapsed = time.time() - start_time
+        print(f"\nTotal execution time: {elapsed:.1f} seconds")
+        
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(os.path.join(tester.working_dir, "last_run.txt"), 'w') as f:
-            f.write(f"Last successful run: {timestamp}\n")
+            f.write(f"Last run: {timestamp}\n")
+            f.write(f"Execution time: {elapsed:.1f}s\n")
             f.write(f"Working models: {len([r for r in results if r.working])}\n")
     else:
         print("\nNo results to save!")
