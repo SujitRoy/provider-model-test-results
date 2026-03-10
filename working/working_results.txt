@@ -1,16 +1,13 @@
-AnyProvider||image
 AnyProvider|aria|text
 AnyProvider|command-a|text
 AnyProvider|command-a25|text
 AnyProvider|command-r|text
 AnyProvider|command-r-plus|text
+AnyProvider|command-r-plus24|text
 AnyProvider|command-r24|text
 AnyProvider|command-r7b|text
 AnyProvider|command-r7b-arabic25|text
 AnyProvider|command-r7b24|text
-AnyProvider|default|text
-AnyProvider|gemini-2.0-flash|text
-AnyProvider|glm-4.7|text
 AnyProvider|gpt-4|text
 AnyProvider|gpt-4o-mini|text
 AnyProvider|gpt-4o-mini-tts|text
@@ -18,6 +15,7 @@ AnyProvider|gpt-5|text
 AnyProvider|gpt-5-thinking|text
 AnyProvider|perplexity|text
 AnyProvider|pplx_pro|text
+AnyProvider|qwen-3-0.6b|text
 AnyProvider|r1-1776|text
 ApiAirforce|dirtberry|image
 ApiAirforce|gemma3-270m:free|text
@@ -38,6 +36,7 @@ HuggingSpace|command-r-08-2024|text
 HuggingSpace|command-r-plus-08-2024|text
 HuggingSpace|command-r7b-12-2024|text
 HuggingSpace|command-r7b-arabic-02-2025|text
+HuggingSpace|flux-dev|image
 OpenAIFM|alloy|text
 OpenAIFM|ash|text
 OpenAIFM|ballad|text
