@@ -1,2 +1,2 @@
-ApiAirforce|flux-2-klein-9b|image
-ApiAirforce|gemma3-270m:free|text
+ApiAirforce|grok-4.1-mini:free|text
+ApiAirforce|translategemma-27b|text
