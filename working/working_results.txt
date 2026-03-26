@@ -1,2 +1,0 @@
-ApiAirforce|grok-4.1-mini:free|text
-ApiAirforce|translategemma-27b|text
