@@ -1,6 +1,7 @@
+ApiAirforce|char-v2|text
 ApiAirforce|gemma3-270m:free|text
-ApiAirforce|special-berry|image
 ApiAirforce|teuken-7b|text
+ApiAirforce|venice|text
 CohereForAI_C4AI_Command|command-a-03-2025|text
 CohereForAI_C4AI_Command|command-r-08-2024|text
 CohereForAI_C4AI_Command|command-r-plus-08-2024|text
